@@ -1,67 +1,78 @@
 import numpy as np
 from hmmlearn.hmm import CategoricalHMM
 from musichmm.data.Song import Song
+from musichmm.models.MusicHMMBase import MusicHMMBase, check_state_initialization
+import warnings
 
-class SimpleMusicHMM:
+
+class SimpleMusicHMM(MusicHMMBase):
     """Class to represent a Hidden Markov Model for music. This model only considers the
-    first part of the music.
+    first part of the music and uses a CategoricalHMM model representation.
 
     Attributes:
-        n_components (int): Number of components for the hidden states of the HMM
-        hmm (CategoricalHMM): HMM model to train and sample from. Available after calling `fit()`
+        hmm (CategoricalHMM): HMM model to train and sample from.
     """
-    def __init__(self, n_components):
-        """Initialize MusicHMM class with a given number of hidden components"""
-        self.n_components = n_components
-        
-    def fit(self, data):
-        """Train the HMM on the given dataset of songs
+    def __init__(self, *args, **kwargs):
+        """Initialize the SimpleMusicHMM class with the underlying CategoricalHMM"""
+        super().__init__()
+        self.hmm = CategoricalHMM(*args, **kwargs)
+
+    def fit(self, dataset):
+        """Train the HMM on the given dataset of songs. 
         
         Parameters:
             songs (SongDataset): A SongDataset object containing songs to train on
         """
-        # Get observations by index and initialize unique states
-        sequence, lengths = self._initialize_states(data)
-        sequence = sequence.reshape(-1,1)
-        print(sequence)
-        
-        # Train an HMM for each part
-        self.hmm = CategoricalHMM(n_components=self.n_components).fit(sequence, lengths=lengths)
+        # Get sequences and sequence lengths to pass to hmm.fit()
+        sequences, lengths = self.initialize_states(dataset) 
+        self.hmm.fit(sequences, lengths=lengths)
 
         return self
         
-    def _initialize_states(self, dataset):
-        """Returns the concatenated dataset, as a sequence of indices that map to note states. Also 
-        initializes the `states_`, `state_to_idx_`, and `n_` hidden attributes. Called internally when fitting.
+    def initialize_states(self, dataset):
+        """Returns the concatenated dataset as a sequence of indices that map to note states. 
+        Called internally when fitting. Outputs can be passed directly to the hmm.fit() method
 
         Parameters:
             dataset (SongDataset): A dataset of Song objects to train on
 
         Returns:
-            (tuple(ndarray(int),ndarray(int))): Tuple containing a note state index sequence concatenated
-                from all songs in the dataset, and an array of sequence lengths for each song.
+            ndarray(int): A 2d sequence of state indices concatenated from all songs in the dataset
+            ndarray(int): An array of sequence lengths for each song in the dataset
         """
-        part_sequences = dataset.to_states()    # (part, song, state sequence)
-        part = part_sequences[0]                # (song, state sequence); only consider the first part
+        self.initialized = False    # Reset the initialized flag in case state initialization fails
 
+        # Get NoteState sequences (only the first part)
+        part_sequences = dataset.to_states()        # (part, song, state sequence)
+        if len(part_sequences) > 1:
+            warnings.warn("SimpleMusicHMM only supports training on Songs with a single part." 
+                          "Only the first part of each song will be used.")
+        part = part_sequences[0]                    # (song, state sequence); only consider the first part
+        self.n_parts = 1
+
+        # Extract the song lengths, and convert to a single sequence of state indices
         lengths = np.array([len(song) for song in part])
-        unique_states, sequence = np.unique(np.concatenate(part), return_inverse=True)
+        unique_states, sequences = np.unique(np.concatenate(part), return_inverse=True)
+        sequences = sequences.reshape(-1,1)
 
-        self.states_ = unique_states
-        self.state_to_idx_ = {state:i for i, state in enumerate(unique_states)}
-        self.n_ = 1
+        # Store the unique states
+        self.states = unique_states
+
+        self.initialized = True     # Successfully initialized states
         
-        return sequence, lengths
+        return sequences, lengths
+
+    def sample(self, num_notes, currstate=None):
+        currstate = self.state_to_idx(currstate) if currstate is not None else currstate
+        return self.hmm.sample(num_notes, currstate=currstate)[0]
+
+    @check_state_initialization
+    def state_to_idx(self, states):
+        return np.searchsorted(self.states, states)
+
+    @check_state_initialization
+    def idx_to_state(self, indices):
+        return self.states[indices.flatten()]
                
-    def gen_song(self, num_notes=30, currstate=None):
-        """Sample a new song from the HMM.
-        
-        Parameters:
-            num_notes (int): Number of notes to sample for the new song
-            currstate (int): Current state to start the sampling from
-
-        Returns:
-            (Song): A new Song object generated from the HMM
-        """
-        _, Z = self.hmm.sample(num_notes, currstate=currstate)
-        return Song.from_sequences([self.states_[Z]])
+    def sequence_to_song(self, X):
+        return Song.from_sequences([self.idx_to_state(X)])

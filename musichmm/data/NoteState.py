@@ -1,108 +1,97 @@
 from music21.note import Note, Rest
 from music21.pitch import Pitch
+from enum import Enum
 
-class NoteState:
-    """Class to represent a note state in the HMM.
-    Main purpose is to compare notes and rests in the state space.
-    
-    Attributes:
-        pitch (str): The string representation of the pitch of the note
-        quarterLength (float): The duration of the note in quarter notes
-    """
-    def __init__(self, note):
-        """Initialize a NoteState object from a music21 note or rest object"""
-        self.isRest = note.isRest
-        self.pitch = str(note.pitch) if not self.isRest else None
-        self.quarterLength = note.quarterLength
+class State:
+    """Abstract class for different states extracted from a song sequence"""
 
-    def note(self):
-        """Return a music21 note object from the NoteState"""
-        if self.isRest:
-            return Rest(quarterLength=self.quarterLength)
-        else:
-            return Note(self.pitch, quarterLength=self.quarterLength)
+    # Use enum to establish state ordering for comparisons
+    StateType = Enum("StateType", ["START", "END", "NOTE", "REST"])
 
-    def __eq__(self, other):
-        """Check if two NoteState objects are equal"""
-        return (self.pitch == other.pitch) and (self.quarterLength == other.quarterLength)
+    def __init__(self, state_type):
+        self._type = self.StateType[state_type.upper()]
 
-    def __lt__(self, other):
-        """Check if one NoteState is less than another"""
-        if isinstance(other, SongStart):
-            return False
-        elif isinstance(other, SongEnd):
-            return True
-        elif self.isRest != other.isRest:             # One is a rest and the other is not
-            return self.isRest
-        elif not self.isRest and not other.isRest:  # Neither are rests
-            if self.pitch != other.pitch:
-                return Pitch(self.pitch) < Pitch(other.pitch)
-            else:
-                return self.quarterLength < other.quarterLength
-        else:                                       # Both are rests
-            return self.quarterLength < other.quarterLength
-    
-    def __le__(self, other):
-        """Check if one NoteState is less than or equal to another"""
-        return (self < other) or (self == other)
-    
-    def __gt__(self, other):
-        """Check if one NoteState is greater than another"""
-        return not (self < other)
-    
-    def __ge__(self, other):
-        """Check if one NoteState is greater than or equal to another"""
-        return (self > other) or (self == other)
-
-    def __repr__(self):
-        """Return a string representation of the NoteState"""
-        return f"NoteState({self.pitch}, {self.quarterLength})"
-
-    def __str__(self):
-        """Return a string representation of the NoteState"""
-        return f"{self.pitch} ({self.quarterLength})"
-
-    # def __hash__(self):
-    #     """Return a hash of the NoteState"""
-    #     return hash((self.pitch, self.quarterLength))
-
-
-class SequenceState(NoteState):
-    """Abstract class for the SongStart and SongEnd states"""
-    def __init__(self):
-        self.isRest = False
-        self.pitch = None
-        self.quarterLength = 0.0
-    
     def note(self):
         return None
 
+    def __getattribute__(self, attr):
+        if attr == "type":
+            return self._type.name
+        return super().__getattribute__(attr)
+
     def __eq__(self, other):
-        return isinstance(other, self.__class__)
+        if not isinstance(other, State):
+            return False
+        return self.__dict__ == other.__dict__
 
     def __lt__(self, other):
-        # Should be defined in subclasses
-        raise NotImplementedError("Cannot compare SequenceState objects")
+        return self._type.value < other._type.value
     
+    def __le__(self, other):
+        return (self < other) or (self == other)
+    
+    def __gt__(self, other):
+        return not (self < other)
+    
+    def __ge__(self, other):
+        return (self > other) or (self == other)
+
+    def __hash__(self):
+        return hash(tuple(self.__dict__.values()))
+
     def __repr__(self):
         return f"{self.__class__.__name__}()"
 
     def __str__(self):
-        return self.__class__.__name__
+        return self.__repr__()
 
 
-class SongStart(SequenceState):
-    def __lt__(self, other):
-        if isinstance(other, NoteState):
-            return True
+class NoteState(State):
+    def __init__(self, pitch, duration):
+        super().__init__(state_type="REST" if pitch=="REST" else "NOTE")
+        self.pitch = str(pitch)
+        self.duration = duration
+
+    def note(self):
+        """Return a music21 Note or Rest object from the NoteState"""
+        if self.type == "REST":
+            return Rest(quarterLength=self.duration)
         else:
-            raise ValueError("Cannot compare SongStart with non-NoteState object")
-
-
-class SongEnd(SequenceState):
+            return Note(pitch=self.pitch, quarterLength=self.duration)
+        
     def __lt__(self, other):
-        if isinstance(other, NoteState):
-            return False
+        if not isinstance(other, NoteState) or self.type != other.type:
+            return super().__lt__(other)
+        elif self.pitch != other.pitch:
+            return Pitch(self.pitch) < Pitch(other.pitch)
         else:
-            raise ValueError("Cannot compare SongEnd with non-NoteState object")
+            return self.duration < other.duration
+
+    def __repr__(self):
+        return f"NoteState({self.pitch}, {self.duration})"
+
+    def as_tuple(self):
+        return (self.pitch, self.duration)
+
+    def __getitem__(self, key):
+        return self.as_tuple()[key]
+
+    @classmethod
+    def from_note(cls, note):
+        pitch = "REST" if note.isRest else str(note.pitch)
+        return cls(pitch, note.quarterLength)
+        
+
+class StartState(State):
+    def __init__(self):
+        super().__init__(state_type="START")
+
+
+class EndState(State):
+    def __init__(self):
+        super().__init__(state_type="END")
+        
+
+        
+
 
