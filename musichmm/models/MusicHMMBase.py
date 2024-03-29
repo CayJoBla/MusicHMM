@@ -11,7 +11,7 @@ class MusicHMMBase:
     def __init__(self):
         self.initialized = False
 
-    def generate_song(self, num_notes, currstate=None):
+    def generate_song(self, num_notes, currstate=None, **kwargs):
         """Sample a sequence from the trained HMM and convert it to a Song object.
         Subclasses should implement the `sample` and `sequence_to_song` methods.
 
@@ -23,7 +23,7 @@ class MusicHMMBase:
             (Song): A new Song object generated from the HMM
         """
         X = self.sample(num_notes, currstate)
-        return self.sequence_to_song(X)
+        return self.sequence_to_song(X, **kwargs)
 
     def save(self, filename):
         """Save the MusicHMMBase object to a file"""

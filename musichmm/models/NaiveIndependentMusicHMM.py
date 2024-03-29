@@ -1,12 +1,14 @@
 import numpy as np
 from hmmlearn.hmm import CategoricalHMM
 from musichmm.data.Song import Song
+from musichmm.data.NoteState import NoteState
 from musichmm.models.MusicHMMBase import MusicHMMBase, check_state_initialization
 import warnings
 
-class NaiveMusicHMM(MusicHMMBase):
+class NaiveIndependentMusicHMM(MusicHMMBase):
     """Class to represent a Hidden Markov Model for music. This model assumes that each 
-    part of the music is independent of the others.
+    part of the music is independent of the others, and that the pitches are independent
+    of their respective note durations
 
     Attributes:
         hmm (list(CategoricalHMM)): List of HMM models to train and sample from.
@@ -14,7 +16,10 @@ class NaiveMusicHMM(MusicHMMBase):
     def __init__(self, n_parts, *args, **kwargs):
         """Initialize the NaiveMusicHMM class with the underlying CategoricalHMM models"""
         super().__init__()
-        self.hmm = [CategoricalHMM(*args, **kwargs) for _ in range(n_parts)]
+        self.hmm = {
+            "pitch": [CategoricalHMM(*args, **kwargs) for _ in range(n_parts)],
+            "duration": [CategoricalHMM(*args, **kwargs) for _ in range(n_parts)]
+        }
         self.n_parts = n_parts
         
     def fit(self, dataset):
@@ -27,8 +32,10 @@ class NaiveMusicHMM(MusicHMMBase):
         sequences, lengths = self.initialize_states(dataset) 
         
         # Train an HMM for each part
-        for i, hmm in enumerate(self.hmm):
-            hmm.fit(sequences[i], lengths=lengths[i])
+        for i, pitch_hmm in enumerate(self.hmm["pitch"]):
+            pitch_hmm.fit(sequences[i][:, np.newaxis, 0], lengths=lengths[i])
+        for i, duration_hmm in enumerate(self.hmm["duration"]):
+            duration_hmm.fit(sequences[i][:, np.newaxis, 1], lengths=lengths[i])
 
         return self
         
@@ -56,14 +63,23 @@ class NaiveMusicHMM(MusicHMMBase):
                              f"{len(part_sequences)} parts. Please provide a dataset containing songs with at "
                              f"least {self.n_parts} parts.")
 
-        # Extract the song lengths, and convert to a single sequence of state indices
-        lengths = [np.array([len(song) for song in part]) for part in part_sequences]
-        states_list = [np.unique(np.concatenate(part), return_inverse=True) for part in part_sequences]
-        unique_states, sequences = map(list, zip(*states_list))
-        sequences = [seq.reshape(-1,1) for seq in sequences]    # Reshape to 2D
+        # Convert the state sequences to indices
+        lengths = []
+        sequences = []
+        unique_pitches = []
+        unique_durations = []
+        for part in part_sequences:
+            lengths.append(np.array([len(song) for song in part]))                              # Get song lengths
+            state_sequence = np.array([state.as_tuple() for song in part for state in song])    # Sequence of (pitch, duration)
+            pitches, pitch_sequences = np.unique(state_sequence[:,0], return_inverse=True)      # Get unique pitches and encode as indices
+            unique_pitches.append(pitches)
+            durations, duration_sequences = np.unique(state_sequence[:,1], return_inverse=True) # Get unique durations and encode as indices
+            unique_durations.append(durations)
+            sequences.append(np.vstack((pitch_sequences, duration_sequences)).T)                # Sequence of (pitch index, duration index)
 
-        # Store the unique states
-        self.states = unique_states
+        # Store the unique states and a define mappings between states to indices
+        self.pitches = unique_pitches
+        self.durations = unique_durations
 
         self.initialized = True     # Successfully initialized states
         
@@ -71,16 +87,23 @@ class NaiveMusicHMM(MusicHMMBase):
 
     def sample(self, num_notes, currstate=None):
         if currstate is not None:
-            raise NotImplementedError("Specifying a current state has not been implemented for NaiveMusicHMM sampling")
-        return [hmm.sample(num_notes, currstate=None)[0] for hmm in self.hmm]
+            raise NotImplementedError("Specifying a current state has not been implemented for NaiveIndependentMusicHMM sampling")
+        X_pitch = [hmm.sample(num_notes, currstate=None)[0] for hmm in self.hmm["pitch"]]
+        X_duration = [hmm.sample(num_notes, currstate=None)[0] for hmm in self.hmm["duration"]]
+        return [np.hstack((pitch, duration)) for pitch, duration in zip(X_pitch, X_duration)]
 
     @check_state_initialization
-    def state_to_idx(self, states): # list(list(NoteState)) - (part, states)
-        return [np.searchsorted(self.states[i], states[i]) for i in range(self.n_parts)]
+    def state_to_idx(self, states):
+        """Convert a list of lists of NoteState objects to a list of lists of state indices"""
+        state_sequence = [np.array([state.as_tuple() for state in part]) for part in states]
+        return [np.vstack((np.searchsorted(pitches, seq[:,0]), np.searchsorted(durations, seq[:,1]))).T 
+                for pitches, durations, seq in zip(self.pitches, self.durations, state_sequence)]
 
     @check_state_initialization
     def idx_to_state(self, indices):
-        return [self.states[i][indices[i].flatten()] for i in range(self.n_parts)]
+        """Convert a list of lists of state indices to a list of lists of NoteState objects"""
+        return [[NoteState(p, float(d)) for p, d in zip(pitches[ind[:,0]], durations[ind[:,1]])] 
+                for pitches, durations, ind in zip(self.pitches, self.durations, indices)]
                
     def sequence_to_song(self, X, truncation=False, padding=False):
         """Return a Song object from a sequence of states. 

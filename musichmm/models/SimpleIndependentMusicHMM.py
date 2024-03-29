@@ -60,7 +60,7 @@ class SimpleIndependentMusicHMM(MusicHMMBase):
         state_sequences = np.array([state.as_tuple() for song in part for state in song])
         unique_pitches, pitch_sequences = np.unique(state_sequences[:,0], return_inverse=True)
         unique_durations, duration_sequences = np.unique(state_sequences[:,1], return_inverse=True)
-        sequences = np.hstack((pitch_sequences.reshape(-1,1), duration_sequences.reshape(-1,1)))
+        sequences = np.vstack((pitch_sequences, duration_sequences)).T
 
         # Store the unique states and a define mappings between states to indices
         self.pitches = unique_pitches
@@ -74,7 +74,7 @@ class SimpleIndependentMusicHMM(MusicHMMBase):
         curr_pitch, curr_duration = self.state_to_idx([currstate])[0] if currstate is not None else (None, None)
         X_pitch = self.hmm["pitch"].sample(num_notes, currstate=curr_pitch)[0]
         X_duration = self.hmm["duration"].sample(num_notes, currstate=curr_duration)[0]
-        return np.hstack((X_pitch.reshape(-1,1), X_duration.reshape(-1,1)))
+        return np.hstack((X_pitch, X_duration))
 
     @check_state_initialization
     def state_to_idx(self, states):
