@@ -9,4 +9,5 @@ from .models import (
     SimpleIndependentMusicHMM,
     NaiveMusicHMM,
     NaiveIndependentMusicHMM,
+    ConditionalMusicHMM
 )

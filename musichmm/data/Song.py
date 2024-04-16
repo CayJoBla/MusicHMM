@@ -59,6 +59,14 @@ class Song:
             score.insert(0, stream.Part([state.note() for state in part if isinstance(state, NoteState)], id=i))
         return cls(score)
 
+    def play(self):
+        """Play the song using the music21 midi player"""
+        self.stream().show('midi')
+
+    def show(self):
+        """Show the song using the music21 musicxml player"""
+        self.score.show()
+
     def save(self, filename):
         """Save the generated song as a midi file"""
         self.stream().write('midi', fp=filename)

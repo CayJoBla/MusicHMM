@@ -3,3 +3,4 @@ from .SimpleMusicHMM import SimpleMusicHMM
 from .SimpleIndependentMusicHMM import SimpleIndependentMusicHMM
 from .NaiveMusicHMM import NaiveMusicHMM
 from .NaiveIndependentMusicHMM import NaiveIndependentMusicHMM
+from .ConditionalMusicHMM import ConditionalMusicHMM
